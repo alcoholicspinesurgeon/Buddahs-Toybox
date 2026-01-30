@@ -1,8 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h> // For isdigit
-
 import "std/string.zc"
 raw {
   typedef enum {
@@ -152,6 +147,14 @@ fn assembleStatement(stmt:Statement) -> mcCode {
         code[0] = 0x48;               //REX.W
         code[1] = 0xBB + stmt.op1.reg;            //Opcode + reg
         *((u32 *)(code+2)) = stmt.op2.constant;  //imm32
+      } 
+      else if (stmt.op1.types == _REG && stmt.op2.types == _REG) {
+        //mov reg, reg  -> 48 89 /r 
+        size = 3;
+        code = (byte *)malloc(size);
+        code[0] = 0x48;
+        code[1] = 0x89;     //MOV r/m64, r64
+        code[2] = (0b11 << 6) | (stmt.op2.reg << 3) | stmt.op1.reg; // ModR/M  
       }
       // Here comes the 'fun' part...... Yay! -.-
       else if (stmt.op1.types == _REG && stmt.op2.types == _MEM_INDIRECT) {
@@ -315,7 +318,7 @@ fn parse(input:FILE*) {
   }
   free(line);
   let i:int = 0;
-  for (i=0; i < nmc; i++) { //} in 0..<nmc) {
+  for (i=0; i < nmc; i++) { 
     let j:usize=0;
     let x=mcs[i].size;
     for(j=0; j < x; j++) { fprintf(stdout, "%02X ", mcs[i].bytes[j]); }
