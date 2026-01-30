@@ -1,17 +1,27 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h> // For isdigit
 
 import "std/string.zc"
 raw {
   typedef enum {
-    _MOV = 1, _ADD, _SUB, _JMP, _PUSH, _POP, _SYSCALL,
+    _MOV = 1, _ADD, _SUB, _JMP, _PUSH, _POP,_LEA, _SYSCALL,
     _INVALID = -1
   } Instrs;
   
-  typedef enum { _REG, _CONST } opTypes;
+  typedef enum { _REG, _CONST, _LABEL, _MEM_INDIRECT, _MEM_DISP } opTypes;
 }
 
 struct opCode{
   types:int;
-  union { reg:int; constant:int; };
+  union { 
+    reg:int; 
+    constant:int;
+    lblName:string;
+    baseReg:int;
+    disp:int;
+  };
 }
 
 struct mcCode {
@@ -25,8 +35,7 @@ struct Statement {
   op2:opCode;
 }
 
-// Gotta change these from strok/cmp pairings.. To lazy rn.
-//var i:int = 2;
+// Gotta change these from strok T_T.
 fn parseStatement(line:string) -> Statement {
   let stmt:Statement;
   let mnem:string = strtok(line, " \t\n");   
@@ -42,13 +51,47 @@ fn parseStatement(line:string) -> Statement {
       stmt.instrs = _MOV;
       let op1:string = strtok(NULL, ", \t\n");
       if(op1) {
+        if(op1[0] == '[') {
+          if(!parseMemOperand(op1, &stmt.op1)) {
+            stmt.instrs = _INVALID;
+            return stmt;
+          }
+        } else {
+          stmt.op1.types = _REG;
+          stmt.op1.reg = registerMap(op1);
+        }
+      }
+      let op2:string = strtok(NULL, ", \t\n");
+      if(op2) {
+        if(op2[0] == '[') {
+          if(!parseMemOperand(op2, &stmt.op2)) {
+            stmt.instrs = _INVALID;
+            return stmt;
+          }
+        } else {
+          stmt.op2.types = _CONST;
+          stmt.op2.constant = atoi(op2);
+        }
+      }
+    },
+    "lea" => {
+      stmt.instrs = _LEA;
+      let op1:string = strtok(NULL, ", \t\n");
+      if(op1) {
         stmt.op1.types = _REG;
         stmt.op1.reg = registerMap(op1);
       }
       let op2:string = strtok(NULL, ", \t\n");
       if(op2) {
-        stmt.op2.types = _CONST;
-        stmt.op2.constant = atoi(op2);
+        if(op2[0] == '[') {
+          if(!parseMemOperand(op2, &stmt.op2)) {
+            stmt.instrs = _INVALID;
+            return stmt;
+          }
+        } else {
+          stmt.instrs = _INVALID;
+          return stmt;
+        }
       }
     },
     "add" => {
@@ -85,6 +128,9 @@ fn parseStatement(line:string) -> Statement {
         stmt.op1.constant = strtol(op1, NULL, 0);
       }
     },
+    "syscall" => {
+      stmt.instrs = _SYSCALL;
+    },
     _ => { stmt.instrs = _INVALID; }
   }
   return stmt;
@@ -94,16 +140,59 @@ fn assembleStatement(stmt:Statement) -> mcCode {
   let mc = mcCode { bytes:NULL, size:0 };
   let code:byte* = NULL;
   let size:usize = 0;
+  let hasSib:int = 0;
+  let sibByte:byte = 0x24; // [RSP] stuffs. (Scale=1, Index=RSP, Base=RSP); < ScaleIndexBase(SIB byte ^_^)
 
   match(stmt.instrs) {
     _MOV => {
       if(stmt.op1.types == _REG && stmt.op2.types == _CONST) {
+        // mov reg, imm32 -> 48 BB imm32
         size = 6                      //instruction size.
         code = (byte *)malloc(size);  //Free'd later on.
         code[0] = 0x48;               //REX.W
         code[1] = 0xBB + stmt.op1.reg;            //Opcode + reg
         *((u32 *)(code+2)) = stmt.op2.constant;  //imm32
       }
+      // Here comes the 'fun' part...... Yay! -.-
+      else if (stmt.op1.types == _REG && stmt.op2.types == _MEM_INDIRECT) {
+        //mov reg, [base reg] -> 48 bb /r
+        // ModR/M -> Mod=00 Reg=op1.reg R/M=op2.baseReg 
+        hasSib = (stmt.op2.baseReg == 4);
+
+        size = 3 + hasSib; // REX.W + Opcode + ModR/M + optional SIB.
+        code = (byte *)malloc(size);
+        code[0] = 0x48;
+        code[1] = 0xBB;
+        code[2] = (0x00 << 6) | (stmt.op1.reg << 3) | stmt.op2.baseReg;; // ModR/M
+        if(hasSib) { code[3] = sibByte; }
+      }
+      else if(stmt.op1.types = _MEM_INDIRECT && stmt.op2.types == _REG) {
+        // mov [base_reg], reg -> 48 89 /r
+        hasSib = (stmt.op1.baseReg == 4);
+
+        size = 3 + hasSib;
+        code = (byte *)malloc(size);
+        code[0] = 0x48;
+        code[1] = 0x89;
+        code[2] = (0x00 << 6) | (stmt.op2.reg << 3) | stmt.op1.baseReg;;
+        if(hasSib) { code[3] = sibByte; }
+      }
+      //TODO: Add Displacement else ifs here...
+    },
+    _LEA => {
+      if(stmt.op1.types == _REG && stmt.op2.types == _MEM_INDIRECT) {
+        // lea reg, [base_reg] -> 48 8D /r
+        // ModR/M -> Mod=00, Reg=op1.reg, RM=op2.baseReg
+        hasSib = (stmt.op2.baseReg == 4);
+
+        size = 3 + hasSib;
+        code = (byte *)malloc(size);
+        code[0] = 0x48;
+        code[1] = 0x8D;
+        code[2] = (0x00 << 6) | (stmt.op1.reg << 3) | stmt.op2.baseReg;
+        if(hasSib) { code[3] = sibByte; }
+      }
+      //TODO: Add LEA Displacement here(lea reg, [base_Reg + disp32])
     },
     _ADD => {
       if(stmt.op1.types == _REG && stmt.op2.types == _CONST) {
@@ -134,6 +223,12 @@ fn assembleStatement(stmt:Statement) -> mcCode {
         code[0] = 0xE9;                           //jmp
         *((u32 *)(code +1)) = stmt.op1.constant;  //imm32
       }
+    },
+    _SYSCALL => {
+      size = 2;
+      code = (byte *)malloc(size);
+      code[0] = 0x0F;
+      code[1] = 0x05;
     }
   } //end match
   mc.bytes = code;
@@ -145,10 +240,48 @@ fn registerMap(regName:string) -> int {
   match (regName) {
     "rax" => return 0,
     "rbx" => return 1,
+    "rcx" => return 2,
+    "rdx" => return 3,
+    "rsp" => return 4;
+    "rbp" => return 5;
+    "rsi" => return 6;
+    "rdi" => return 7;
   }
   return -1;
 }
 
+fn parseMemOperand(opStr:string, operand:opCode*) -> int { 
+  if(opStr == NULL || strlen(opStr) < 3 || opStr[0] != '[' || opStr[strlen(opStr)-1] != ']') 
+    return 0;
+  let inner:string = strdup(opStr + 1);
+  inner[strlen(inner)-1] = '\0';
+  let tok:string = strtok(inner, " + ");
+  if(tok == NULL) { 
+    free(inner); 
+    return 0; 
+  }
+  operand.baseReg = registerMap(tok);
+  if(operand.baseReg == -1) {
+    free(inner);
+    return 0;
+  }
+  tok = strtok(NULL, " + ");
+  if(tok == NULL) {
+    operand.types = _MEM_INDIRECT;
+    operand.disp = 0;
+  } else {
+    operand.types = _MEM_DISP;
+    operand.disp = strtol(tok, NULL, 0);
+  }
+  free(inner);
+  return 1;
+}
+
+/*
+TODO:
+  Change the prirnt out to a mmap to execute the loaded file in memory 
+  so it can do... I dunno, something... SYSCALL write or something. Iunno.
+*/
 fn parse(input:FILE*) {
   let line:string = NULL;
   let len:usize = 0;
