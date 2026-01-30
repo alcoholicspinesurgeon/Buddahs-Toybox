@@ -1,0 +1,107 @@
+
+raw {
+  typedef enum {
+    _PUSH, _POP, _ADD, _SUB, _MUL, _DIV, _CALL,_RET, _HLT
+  } opcodes;
+}
+
+struct VM {
+  vm:void*;
+  stack:[int; 256];
+  sp:int;
+  instr:int*;
+  ip:int;
+  funcs:[void*; 15];
+  retVal:int;
+}
+
+impl VM {
+  fn new(instructions:int*) -> VM { 
+    let v:void* = malloc(sizeof(VM));
+    return VM {vm:v, instr:instructions, sp:-1, ip:0 }
+  }
+
+  fn die(self) { if(self.vm!=0) free(self.vm);}
+  
+  fn push(self, value:int) {
+    if(self.sp >= 255) {
+      !"Error: StackOver flow."
+      exit(1);
+    }
+    self.stack[self.sp++] = value; 
+  }
+
+  fn pop(self) => int {
+    if(self.sp < 0) {
+      !"Error: Stack Underflow."
+      exit(0);
+    }
+    return self.stack[self.sp--];
+  }
+
+  fn run(self) {
+    loop {
+      let inst:int = self.instr[self.ip++];
+      match(inst) {
+        _PUSH => {
+          let v:int = self.instr[self.ip++];
+          self.push(v); 
+        },
+        _POP => {
+          self.pop();
+        },
+        _ADD => {
+          let a:int = self.pop();
+          let b:int = self.pop();
+          self.push(a+b);
+        },
+        _SUB => {
+          let a:int = self.pop();
+          let b:int = self.pop();
+          self.push(a - b);
+        },
+        _DIV => {
+          let a:int = self.pop();
+          let b:int = self.pop();
+          self.push(a / b);
+        },
+        _MUL => {
+          let a:int = self.pop();
+          let b:int = self.pop();
+          self.push(a*b);
+        },
+        _RET => {
+          self.retVal = self.pop();
+        },
+        _CALL => {
+          let fi:int = self.instr[self.ip++];
+          if(fi <= 0 || fi >= 15 || self.funcs[fi] == NULL) {
+            !"Error: Invalid function call."
+            exit(1);
+          } 
+          let _x:void* = self.funcs[fi];
+          asm {
+            "movq {_x}, %rax"
+            "call *%rax"
+            :in(_x)
+          }
+        },
+        _HLT => 
+          return;
+        _ => {
+          !"Error: Unknown instruction: {inst}"
+          exit(1);
+        }
+      }
+    }
+  }
+  
+  fn getRet(self) -> int { return self.retVal; }
+  fn reg_builtin(self, index:int, func:void*) {
+    if(index < 0 || index > 15) {
+      !"Error: Invalid function index."
+      exit(1);
+    }
+    self.funcs[index] = func;
+  }
+}

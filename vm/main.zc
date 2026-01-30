@@ -1,0 +1,29 @@
+
+import "vm.zc"
+
+fn main() -> int {
+  raw {
+  int code[] = {
+    _PUSH, 10,          // push 10
+    _PUSH, 2,           // Push 2 onto the stack
+    _SUB,               // pop 2 args on the stack and sub
+    _CALL, 1,           // call 1st pos in the array
+    _PUSH, 2,
+    _PUSH, 5,
+    _MUL,  1,           // multiply after pop
+    _RET,  1,           // pop off stack, retrun value
+    _HLT   1,           // Catch fire ...
+    };
+  }
+
+  var mach = VM::new(code);
+  mach.reg_builtin(1, bprint);
+  mach.run();
+  var r:int = mach.getRet();
+  "Annnnd the winner is {r}";
+  mach.die();
+  exit(0);
+  return 0;
+}
+
+fn bprint() { "Builtin: Nothing to see here." }
