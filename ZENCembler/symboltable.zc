@@ -1,0 +1,59 @@
+
+/* symbol table for the 2 pass assembler, kinda required for Labels. */
+
+struct Symbol {
+  name:string;
+  address:usize;
+  next:Symbol*;
+}
+
+struct symbolTable {
+  head:Symbol*;
+}
+
+fn createSymbTable() -> symbolTable*{
+  let table:symbolTable* = (symbolTable *)malloc(sizeof(symbolTable));
+  if(table == NULL) {
+    !"!! createSymTable -> It pooped itself. ;S"
+    exit(-1);
+  }
+  table.head = NULL;
+  return table;
+}
+
+fn addSym(table:symbolTable*, name:const string, address:usize) {
+  if(findSym(table, name) != NULL) {
+    !"!! addSym -> Symbol {table} already exists"
+    exit(-1);
+  }
+
+  let newSym = (Symbol *)malloc(sizeof(Symbol));
+  if(newSym == NULL) {
+    !"!! addSym -> New symbol hates you.(failed to create)"
+    free(newSym)
+    exit(-1);
+  }
+  newSym.address = address;
+  newSym.next = table.head;
+  table.head = newSym;
+}
+
+fn findSym(table:symbolTable*, name:const string) -> Symbol* {
+  let curr:Symbol* = table.head;
+  while(curr != NULL) {
+    if(strcmp(curr.name, name) == 0) { return curr; }
+    curr = curr.next;
+  }
+  return NULL;
+}
+
+fn freeSymTable(table:symbolTable*) {
+  let curr:Symbol* = table.head;
+  while(curr != NULL) {
+    let next:Symbol* = curr.next;
+    free(curr.name);
+    free(curr);
+    curr = next;
+  }
+  free(table);
+}

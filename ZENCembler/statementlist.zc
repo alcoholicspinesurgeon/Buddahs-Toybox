@@ -1,0 +1,44 @@
+
+struct StatementList {
+  statements:Statement*;
+  count:usize;
+  capacity:usize;
+}
+
+fn createStatementList() -> StatementList* {
+  let list:StatementList* = (StatementList *)malloc(sizeof(StatementList));
+  if(list == NULL) {
+    !"!! CreateStatementList-> Mallocs Kaput."
+    exit(-1);
+  }
+  list.statements = NULL;
+  list.count = 0;
+  list.capacity = 0;
+  return list;
+}
+
+
+fn addStatementToList(list:StatementList*, stmt:Statement) {
+  if(list.count == list.capacity) {
+    list.capacity = (list.capacity == 0) ? 1 : list.capacity * 2;
+    list.statements = (Statement *)realloc(list.statements, list.capacity * sizeof(Statement));
+    if(list.statements == NULL) {
+      !"!! addStatementToList -> realloc's dead :p"
+      exit(-1);
+    }
+  }
+  list.statements[list.count++] = stmt;
+}
+
+
+fn freeStatementList(list:StatementList*) {
+  if(list == NULL) { return; }
+  let i:usize = 0;
+  for(i=0; i <= list.count; i++) {
+    if(list.statements[i].instrs == _JMP && list.statements[i].op1.types == _LABEL) {
+      free(list.statements[i].op1.labelName);
+    }
+  }
+  free(list.statements);
+  free(list);
+}
