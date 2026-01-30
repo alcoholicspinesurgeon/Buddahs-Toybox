@@ -1,7 +1,4 @@
 
-//import "std.zc"
-//#include <stdlib.h>
-//#include <string.h>
 import "std/string.zc"
 raw {
   typedef enum {
