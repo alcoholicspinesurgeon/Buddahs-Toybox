@@ -1,0 +1,207 @@
+
+//import "std.zc"
+//#include <stdlib.h>
+//#include <string.h>
+import "std/string.zc"
+raw {
+  typedef enum {
+    _MOV = 1, _ADD, _SUB, _JMP, _PUSH, _POP, _SYSCALL,
+    _INVALID = -1
+  } Instrs;
+  
+  typedef enum { _REG, _CONST } opTypes;
+}
+
+struct opCode{
+  types:int;
+  union { reg:int; constant:int; };
+}
+
+struct mcCode {
+  bytes:byte*;
+  size:usize;
+}
+
+struct Statement {
+  instrs:int;
+  op1:opCode;
+  op2:opCode;
+}
+
+// Gotta change these from strok/cmp pairings.. To lazy rn.
+//var i:int = 2;
+fn parseStatement(line:string) -> Statement {
+  let stmt:Statement;
+  let mnem:string = strtok(line, " \t\n");   
+
+  if(mnem==NULL) {
+    stmt.instrs = _INVALID;
+    return stmt;
+  }
+  let sz = String::from(mnem);
+  defer { sz.free(); }
+  match(sz.c_str()) {
+    "mov" => {
+      stmt.instrs = _MOV;
+      let op1:string = strtok(NULL, ", \t\n");
+      if(op1) {
+        stmt.op1.types = _REG;
+        stmt.op1.reg = registerMap(op1);
+      }
+      let op2:string = strtok(NULL, ", \t\n");
+      if(op2) {
+        stmt.op2.types = _CONST;
+        stmt.op2.constant = atoi(op2);
+      }
+    },
+    "add" => {
+      stmt.instrs = _ADD;
+      let op1:string = strtok(NULL, ", \t\n");
+      if(op1) {
+        stmt.op1.types = _REG;
+        stmt.op1.reg = registerMap(op1);
+      }
+      let op2:string = strtok(NULL, ", \n\t");
+      if(op2) {
+        stmt.op2.types = _CONST;
+        stmt.op2.constant = atoi(op2);
+      }
+    },
+    "sub" => {
+      stmt.instrs = _SUB;
+      let op1:string = strtok(NULL, ", \t\n");
+      if(op1) {
+        stmt.op1.types = _REG;
+        stmt.op1.reg = registerMap(op1);
+      }
+      let op2:string = strtok(NULL, ", \t\n");
+      if(op2) {
+        stmt.op2.types = _CONST;
+        stmt.op2.constant = atoi(op2);
+      }
+    },
+    "jmp" => {
+      stmt.instrs = _JMP;
+      let op1:string = strtok(NULL, " \t\n");
+      if(op1) {
+        stmt.op1.types = _CONST;
+        stmt.op1.constant = strtol(op1, NULL, 0);
+      }
+    },
+    _ => { stmt.instrs = _INVALID; }
+  }
+  return stmt;
+}
+
+fn assembleStatement(stmt:Statement) -> mcCode {
+  let mc = mcCode { bytes:NULL, size:0 };
+  let code:byte* = NULL;
+  let size:usize = 0;
+
+  match(stmt.instrs) {
+    _MOV => {
+      if(stmt.op1.types == _REG && stmt.op2.types == _CONST) {
+        size = 6                      //instruction size.
+        code = (byte *)malloc(size);  //Free'd later on.
+        code[0] = 0x48;               //REX.W
+        code[1] = 0xBB + stmt.op1.reg;            //Opcode + reg
+        *((u32 *)(code+2)) = stmt.op2.constant;  //imm32
+      }
+    },
+    _ADD => {
+      if(stmt.op1.types == _REG && stmt.op2.types == _CONST) {
+        // add reg, imm32 -> 48 81 c0/c3 imm32
+        size = 7;
+        code = (byte *)malloc(size);
+        code[0] = 0x48; 
+        code[1] = 0x81; 
+        code[2] = 0xX0 + stmt.op1.reg;    //ModR/M (C0 for RAX, C3 for rbx )
+        *((u32 *)(code+1)) = stmt.op2.constant;
+      }
+    },
+    _SUB => {
+      if (stmt.op1.types == _REG && stmt.op2.types == _CONST) {
+        // sub rax, imm32 -> 48 81 E8 imm32
+        size = 7;
+        code = (byte *)malloc(size);
+        code[0] = 0x48; 
+        code[1] = 0x81;
+        code[2] = 0xE8 + stmt.op1.reg; // ModR/M (0xE8 for RAX, 0xEB for RBX)
+        *((u32 *)(code+3)) = stmt.op2.constant; // imm32
+      }
+    },
+    _JMP => {
+      if(stmt.op1.types == _CONST) {
+        size = 5;
+        code = (byte *)malloc(size);
+        code[0] = 0xE9;                           //jmp
+        *((u32 *)(code +1)) = stmt.op1.constant;  //imm32
+      }
+    }
+  } //end match
+  mc.bytes = code;
+  mc.size = size;
+  return mc;
+}
+
+fn registerMap(regName:string) -> int {
+  match (regName) {
+    "rax" => return 0,
+    "rbx" => return 1,
+  }
+  return -1;
+}
+
+fn parse(input:FILE*) {
+  let line:string = NULL;
+  let len:usize = 0;
+  let read:usize;
+  let mcs:mcCode* = NULL;
+  let nmc:usize=0;
+  let cmc:usize=0;
+
+  while((read=getline(&line, &len, input))!=-1) {
+    let linecpy:string = strdup(line);
+    if(linecpy==NULL) {
+      !"! Strdup shat the bed.. :["
+      exit(-1);
+    }
+    let stmt:Statement = parseStatement(linecpy);
+    if(stmt.instrs != _INVALID) {
+      let mc:mcCode = assembleStatement(stmt);
+      if(mc.bytes != NULL) {
+        if(nmc == cmc) {
+          cmc = (cmc==0) ? 1 : cmc * 2;
+          mcs = (mcCode *)realloc(mcs, cmc * sizeof(mcCode));
+          if(mcs == NULL || mcs < 0) {
+            !"! Realloc done itself a mistiff. :["
+            exit(-1);
+          }
+        }
+        mcs[nmc++] = mc;
+      }
+    }
+    free(linecpy);
+  }
+  free(line);
+  let i:int = 0;
+  for (i=0; i < nmc; i++) { //} in 0..<nmc) {
+    let j:usize=0;
+    let x=mcs[i].size;
+    for(j=0; j < x; j++) { fprintf(stdout, "%02X ", mcs[i].bytes[j]); }
+    fprintf(stdout, "\n");
+    free(mcs[i].bytes);
+  }
+  free(mcs);
+}
+
+fn main(argc:int, argv:string*) -> int {
+  if(argc < 2) {
+    "Usage: asm <file.asm>"
+  } else {
+    let file:string = argv[1];
+    let inp:FILE* = fopen(argv[1], "r");
+    parse(inp);
+  }
+  return 0;
+}
