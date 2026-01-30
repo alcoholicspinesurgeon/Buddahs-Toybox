@@ -2,7 +2,7 @@
 a toy VM and assembler written in Zen-C. <br> 
 Will submit as examples to the repo when they do something more interesting than nothing. :D <br><br>
 
-<h1>Assembler</h1><br><br>
+<h1>ZENCembler(heh)</h1><br><br>
 <b>Done:</b><br>
   added registers: RCX,RDX, RSP, RSI, RDI<br>
   Add fixed size Sib and Modr/m to MOV and LEA.<br><br>
