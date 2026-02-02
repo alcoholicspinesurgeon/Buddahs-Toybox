@@ -7,12 +7,12 @@ struct Symbol {
   next:Symbol*;
 }
 
-struct symbolTable {
+struct SymbolTable {
   head:Symbol*;
 }
 
-fn createSymbTable() -> symbolTable*{
-  let table:symbolTable* = (symbolTable *)malloc(sizeof(symbolTable));
+fn createSymTable() -> SymbolTable* {
+  let table:SymbolTable* = (SymbolTable *)malloc(sizeof(SymbolTable));
   if(table == NULL) {
     !"!! createSymTable -> It pooped itself. ;S"
     exit(-1);
@@ -21,7 +21,7 @@ fn createSymbTable() -> symbolTable*{
   return table;
 }
 
-fn addSym(table:symbolTable*, name:const string, address:usize) {
+fn addSym(table:SymbolTable*, name:const string, address:usize) {
   if(findSym(table, name) != NULL) {
     !"!! addSym -> Symbol {table} already exists"
     exit(-1);
@@ -38,7 +38,7 @@ fn addSym(table:symbolTable*, name:const string, address:usize) {
   table.head = newSym;
 }
 
-fn findSym(table:symbolTable*, name:const string) -> Symbol* {
+fn findSym(table:SymbolTable*, name:const string) -> Symbol* {
   let curr:Symbol* = table.head;
   while(curr != NULL) {
     if(strcmp(curr.name, name) == 0) { return curr; }
@@ -47,13 +47,15 @@ fn findSym(table:symbolTable*, name:const string) -> Symbol* {
   return NULL;
 }
 
-fn freeSymTable(table:symbolTable*) {
-  let curr:Symbol* = table.head;
-  while(curr != NULL) {
-    let next:Symbol* = curr.next;
-    free(curr.name);
-    free(curr);
-    curr = next;
+fn freeSymTable(table:SymbolTable*) {
+  if(table != NULL) {
+    let curr:Symbol* = table.head;
+    while(curr != NULL) {
+      let next:Symbol* = curr.next;
+      free(curr.name);
+      free(curr);
+      curr = next;
+    }
+    free(table); 
   }
-  free(table);
 }

@@ -1,7 +1,9 @@
+
+mov eax, rax
 mov rax, 1
-mov rcx, rbx
-mov [rax], rbx
-jmp 0x42
-mov rdi, 0
-mov rax, 60
-syscall
+jmp lblone
+mov rax, [rsp]
+mov rbx, [rsp+10]
+lblone:
+  mov rax, rbx
+  mov rcx, rdx

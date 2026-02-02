@@ -1,16 +1,16 @@
+#include <ctype.h>
 import "std/string.zc"
-
-
 /* Both of these are required for the 2 pass assembler.*/
 import "statementlist.zc"
 import "symboltable.zc"
 
 raw {
+//  typedef enum { _DB } Directive;
+//  typedef enum { _INSTRUCTION, _DIRECTIVE } StatementType; --> Next stage of shit todo. T_T
   typedef enum {
     _MOV = 1, _ADD, _SUB, _JMP, _PUSH, _POP,_LEA, _SYSCALL,
     _INVALID = -1
   } Instrs;
-  
   typedef enum { _REG, _CONST, _LABEL, _MEM_INDIRECT, _MEM_DISP } opTypes;
 }
 
@@ -20,40 +20,45 @@ struct Operand{
     reg:int; 
     constant:int;
     labelName:string;
-    baseReg:int;
-    disp:int;
+    mem:Memory;
   };
 }
 
-struct machineCode {
+struct Memory {
+  baseReg:int;
+  disp:int;
+}
+struct MachineCode {
   bytes:byte*;
   size:usize;
 }
 
+@derive(Copy)
 struct Statement {
   instrs:int;
   op1:Operand;
   op2:Operand;
 }
 
-// Gotta change these from strok T_T.
 fn parseStatement(line:string) -> Statement {
   let stmt:Statement;
   let mnem:string = strtok(line, " \t\n");   
+  stmt.op1.types = _INVALID;
+  stmt.op2.types = _INVALID;
 
   if(mnem==NULL) {
     stmt.instrs = _INVALID;
     return stmt;
   }
-  let sz = String::from(mnem);
-  defer { sz.free(); }
-  match(sz.c_str()) {
+
+  match(mnem) {
     "mov" => {
       stmt.instrs = _MOV;
       let op1:string = strtok(NULL, ", \t\n");
       if(op1) {
         if(op1[0] == '[') {
           if(!parseMemOperand(op1, &stmt.op1)) {
+            printf("!! parseMemOperand failed on MOV [reg], .. with %s\n",op1);
             stmt.instrs = _INVALID;
             return stmt;
           }
@@ -167,8 +172,8 @@ fn parseStatement(line:string) -> Statement {
   return stmt;
 }
 
-fn assembleStatement(stmt:Statement) -> machineCode {
-  let mc = machineCode { bytes:NULL, size:0 };
+fn assembleStatement(stmt:Statement) -> MachineCode {
+  let mc = MachineCode { bytes:NULL, size:0 };
   let code:byte* = NULL;
   let size:usize = 0;
   let hasSib:int = 0;
@@ -196,62 +201,60 @@ fn assembleStatement(stmt:Statement) -> machineCode {
       else if (stmt.op1.types == _REG && stmt.op2.types == _MEM_INDIRECT) {
        // mov reg, [base reg] -> 48 bb /r
        //  ModR/M -> Mod=00 Reg=op1.reg R/M=op2.baseReg 
-        hasSib = (stmt.op2.baseReg == 4);
+        hasSib = (stmt.op2.mem.baseReg == 4);
 
         size = 3 + hasSib; // REX.W + Opcode + ModR/M + optional SIB.
         code = (byte *)malloc(size);
         code[0] = 0x48;
         code[1] = 0xBB;
-        code[2] = (0x00 << 6) | (stmt.op1.reg << 3) | stmt.op2.baseReg; // ModR/M
+        code[2] = (0x00 << 6) | (stmt.op1.reg << 3) | stmt.op2.mem.baseReg; // ModR/M
         if(hasSib) { code[3] = sibByte; }
       }
-      /* --------------------> Not working, work it out later. <-----------------------------
-      else if(stmt.op1.types = _MEM_INDIRECT && stmt.op2.types == _REG) {
+      else if(stmt.op1.types == _MEM_INDIRECT && stmt.op2.types == _REG) {
       //   mov [base_reg], reg -> 48 89 /r
-        hasSib = (stmt.op1.baseReg == 4);
+        hasSib = (stmt.op1.mem.baseReg == 4);
 
         size = 3 + hasSib;
         code = (byte *)malloc(size);
         code[0] = 0x48;
         code[1] = 0x89;
-        code[2] = (0x00 << 6) | (stmt.op2.reg << 3) | stmt.op1.baseReg;
+        code[2] = (0x00 << 6) | (stmt.op2.reg << 3) | stmt.op1.mem.baseReg;
         if(hasSib) { code[3] = sibByte; }
       }
-      */
-      else if(stmt.op1.types = _REG && stmt.op2.types == _MEM_DISP) {
+      else if(stmt.op1.types == _REG && stmt.op2.types == _MEM_DISP) {
         // mov reg, [base_reg + disp32] - > 48 8B /r +disp32
         // ModR/M -> Mod=10, reg=op1.reg R/M=op2.baseReg
-        hasSib = (stmt.op2.baseReg == 4);
+        hasSib = (stmt.op2.mem.baseReg == 4);
 
         size = 7 + hasSib;
         code = (byte *)malloc(size);
         code[0] = 0x48;
         code[1] = 0x8B;
-        code[2] = (0x02 << 6) | (stmt.op1.reg << 3) | stmt.op2.baseReg;
+        code[2] = (0x02 << 6) | (stmt.op1.reg << 3) | stmt.op2.mem.baseReg;
 
         if(hasSib) {
           code[3] = sibByte;
-          *((u32 *)(code +4)) = stmt.op2.disp;
+          *((u32 *)(code +4)) = stmt.op2.mem.disp;
         } else {
-          *((u32 *)(code +3)) = stmt.op2.disp;
+          *((u32 *)(code +3)) = stmt.op2.mem.disp;
         }
       }
       
       else if (stmt.op1.types == _MEM_DISP && stmt.op2.types == _REG) {
-        // mov [base_reg + disp32] -> 48 89 /r + Disp32
-        hasSib = (stmt.op1.baseReg == 4);
+        // mov [base_reg + disp32], reg -> 48 89 /r + Disp32
+        hasSib = (stmt.op1.mem.baseReg == 4);
 
         size = 7 + hasSib;
         code = (byte *)malloc(size);
         code[0] = 0x48;
         code[1] = 0x89;
-        code[2] = (0x02 << 6) | (stmt.op2.reg << 3) | stmt.op1.baseReg;
+        code[2] = (0x02 << 6) | (stmt.op2.reg << 3) | stmt.op1.mem.baseReg;
 
         if(hasSib) {
           code[3] = sibByte;
-          *((u32 *)(code + 4)) = stmt.op1.disp;
+          *((u32 *)(code + 4)) = stmt.op1.mem.disp;
         } else {
-          *((u32 *)(code + 3)) = stmt.op1.disp;
+          *((u32 *)(code + 3)) = stmt.op1.mem.disp;
         }
       }
       
@@ -260,31 +263,31 @@ fn assembleStatement(stmt:Statement) -> machineCode {
       if(stmt.op1.types == _REG && stmt.op2.types == _MEM_INDIRECT) {
         // lea reg, [base_reg] -> 48 8D /r
         // ModR/M -> Mod=00, Reg=op1.reg, RM=op2.baseReg
-        hasSib = (stmt.op2.baseReg == 4);
+        hasSib = (stmt.op2.mem.baseReg == 4);
 
         size = 3 + hasSib;
         code = (byte *)malloc(size);
         code[0] = 0x48;
         code[1] = 0x8D;
-        code[2] = (0x00 << 6) | (stmt.op1.reg << 3) | stmt.op2.baseReg;
+        code[2] = (0x00 << 6) | (stmt.op1.reg << 3) | stmt.op2.mem.baseReg;
         if(hasSib) { code[3] = sibByte; }
       }
       else if(stmt.op1.types == _REG && stmt.op2.types == _MEM_DISP) {
         // lea reg, [base_req + disp32] -> 48 8D /r + disp32
         // ModR/M -> Mod=10, reg=op1.reg, R/M=op2.baseReg
-        hasSib = (stmt.op2.baseReg == 4);
+        hasSib = (stmt.op2.mem.baseReg == 4);
 
         size = 7 + hasSib;  // REX.Q + Opcode + ModR/M + optional SIB + disp32
         code = (byte *)malloc(size);
         code[0] = 0x48;
         code[1] = 0x8D;
-        code[2] = (0x02 << 6) | (stmt.op1.reg << 3) | stmt.op2.baseReg;
+        code[2] = (0x02 << 6) | (stmt.op1.reg << 3) | stmt.op2.mem.baseReg;
 
         if(hasSib) {
           code[3] = sibByte;
-          *((u32 *)(code + 4)) = stmt.op2.disp;
+          *((u32 *)(code + 4)) = stmt.op2.mem.disp;
         } else {
-          *((byte *)(code + 3)) = stmt.op2.disp;
+          *((u32 *)(code + 3)) = stmt.op2.mem.disp;
         }
       }
     },
@@ -368,69 +371,154 @@ fn parseMemOperand(opStr:string, operand:Operand*) -> int {
     free(inner); 
     return 0; 
   }
-  operand.baseReg = registerMap(tok);
-  if(operand.baseReg == -1) {
+  operand.mem.baseReg = registerMap(tok);
+  if(operand.mem.baseReg == -1) {
     free(inner);
     return 0;
   }
   tok = strtok(NULL, " + ");
   if(tok == NULL) {
     operand.types = _MEM_INDIRECT;
-    operand.disp = 0;
+    operand.mem.disp = 0;
   } else {
     operand.types = _MEM_DISP;
-    operand.disp = strtol(tok, NULL, 0);
+    operand.mem.disp = strtol(tok, NULL, 0);
   }
   free(inner);
   return 1;
 }
 
-/*
-TODO:
-  Change the prirnt out to a mmap to execute the loaded file in memory 
-  so it can do... I dunno, something... SYSCALL write or something. Iunno.
+/* 
+   This things fucked.
+   Didn't look that far into it.. It works(kinda) for now. Fix it later.. T_T
 */
-fn parse(input:FILE*) {
+fn parse(input:FILE*, output:FILE*, symtable:SymbolTable*, pass:int, stmtlist:StatementList*) {
   let line:string = NULL;
   let len:usize = 0;
   let read:usize;
-  let mcs:machineCode* = NULL;
-  let nmc:usize=0;
-  let cmc:usize=0;
+  let curAddress:usize = 0;
 
-  while((read=getline(&line, &len, input))!=-1) {
-    let linecpy:string = strdup(line);
-    if(linecpy==NULL) {
-      !"! Strdup shat the bed.. :["
-      exit(-1);
+  line = (string)malloc(128);
+  if(line == NULL) {
+    !"!! parse() -> malloc shat the bed. "
+    exit(-1);
+  }
+  len = 128;
+
+  // pass 1.
+  if(pass == 1) {
+    fseek(input, 0, SEEK_SET);
+    while((read=getline(&line, &len, input))!=-1) {
+      let linecpy:string = strdup(line);
+      if(linecpy==NULL) {
+        !"! Parse(1) -> Strdup shat the bed.. :["
+        exit(-1);
+      }
+      linecpy[strcspn(linecpy, "\n")] = '\0';
+      let trimLine = linecpy;
+      while(isspace((char)*trimLine)) { trimLine++; }
+      //Comments / newlines etc D:
+      if(strlen(trimLine) == 0 || trimLine[0] == ';') { free(linecpy); continue; }
+      let instrPart:string = trimLine;
+      let labelEnd:string = strchr(trimLine, ':');
+      if(labelEnd != NULL) {
+        *labelEnd = '\0';
+        let labelName = trimLine;
+        let labelNameEnd = labelName + strlen(labelName) - 1;
+        while (labelNameEnd >= labelName && isspace((char )*labelNameEnd)) { *labelNameEnd-- = '\0' }
+        if(strlen(labelName)>0) {
+          addSym(symtable, labelName, curAddress);
+        } else {
+          !"!! parse(1) -> Symbol Table is empty? Dafuq?"
+          exit(-1);
+        }
+        instrPart = labelEnd + 1;
+        while(isspace((char)*instrPart)) { instrPart++; }
+        if(strlen(instrPart) == 0) {
+          free(linecpy);
+          continue;
+        }
+      }
+      // JMP processing(JNE JE JL JG etc would go here too)
+      let stmt:Statement = parseStatement(instrPart);
+      if(stmt.instrs != _INVALID) {
+        let tmp:Statement = stmt;
+        if(tmp.instrs == _JMP && tmp.op1.types == _LABEL) {
+          tmp.op1.types = _CONST;
+          tmp.op1.constant = 0;        //Place holder for calcs in pass 2. 
+        }
+        let mc:MachineCode = assembleStatement(tmp);
+        if(mc.bytes != NULL) {
+          curAddress += mc.size;
+          //free(mc.bytes);      //<- Fuck knows why this is being called multiple times/causes seg faults... *shrugs*
+          addStatementToList(stmtlist, stmt);
+        } else {
+          !"!! Parse -> Couldn't assemble statment, ask ChatGPT."
+          if(stmt.instrs == _JMP && stmt.op1.types == _LABEL) { free(stmt.op1.labelName);}
+          exit(-1);
+        }
+      } else {
+        !"!! Parse -> Invalid statement. Kinda like this one."
+        exit(-1);
+      }
+      free(linecpy); 
     }
-    let stmt:Statement = parseStatement(linecpy);
-    if(stmt.instrs != _INVALID) {
-      let mc:machineCode = assembleStatement(stmt);
+  } 
+  else {   // Pass 2 - Code generation.. Hold onto your socks..
+    let mcs:MachineCode*;
+    let nmc:usize = 0;
+    let cmc:usize =0;
+    let i:usize = 0;
+
+    curAddress = 0;
+    for(i = 0; i < stmtlist.count; i++) {
+      let stmt:Statement = stmtlist.statements[i];
+
+      //Handle relative jumps.
+      if(stmt.instrs == _JMP && stmt.op1.types == _LABEL) {
+        let foundSym:Symbol* = findSym(symtable, stmt.op1.labelName);
+        if(foundSym == NULL) {
+          !"!! Parse(2) -> findSym didn't find shit... invalid label.."
+          exit(-1);
+        }
+        let targetAddr = foundSym.address;
+        let instrSize = 0;
+        //JMP is 5 bytes -> E9 + 4 byte displacement(relative to the NEXT instruction).
+        if(stmt.instrs == _JMP) { instrSize = 5; }
+        stmt.op1.constant = targetAddr - (curAddress + instrSize); //Our rel jmp address. ^_^
+        stmt.op1.types = _CONST;
+      }
+      let mc:MachineCode = assembleStatement(stmt);
       if(mc.bytes != NULL) {
         if(nmc == cmc) {
-          cmc = (cmc==0) ? 1 : cmc * 2;
-          mcs = (machineCode *)realloc(mcs, cmc * sizeof(machineCode));
-          if(mcs == NULL || mcs < 0) {
-            !"! Realloc dead. :["
+          //A dynamic array's probably not the best way to go here but whatever..
+          cmc = (cmc == 0) ? 1 : cmc * 2;
+          mcs = (MachineCode *)realloc(mcs, cmc * sizeof(MachineCode));
+          if(mcs == NULL) {
+            !"!! Parse(2) -> realloc again... Srsly.."
             exit(-1);
           }
         }
         mcs[nmc++] = mc;
+        curAddress += mc.size;
+      } else {
+        !"!! Parse(2) - Couldn't assemble in Phase 2.. :["
+        exit(-1);
       }
     }
-    free(linecpy);
+    i = 0;
+    for(i = 0; i < nmc; i++){
+      if(output == stdout) {
+        let j:usize = 0;
+        let x=mcs[i].size;
+        for(j =0; j < x; j++) { fprintf(output, "%02X ", mcs[i].bytes[j]); }
+        fprintf(output, "\n");
+      } else { fwrite(mcs[i].bytes, 1, mcs[i].size, output);}
+      //free(mcs[i].bytes);               // << Srsly, dafuq is up with these things ..
+    }
+    free(mcs);
   }
   free(line);
-  let i:int = 0;
-  for (i=0; i < nmc; i++) { 
-    let j:usize=0;
-    let x=mcs[i].size;
-    for(j=0; j < x; j++) { fprintf(stdout, "%02X ", mcs[i].bytes[j]); }
-    fprintf(stdout, "\n");
-    free(mcs[i].bytes);
-  }
-  free(mcs);
 }
 
 fn main(argc:int, argv:string*) -> int {
@@ -439,7 +527,27 @@ fn main(argc:int, argv:string*) -> int {
   } else {
     let file:string = argv[1];
     let inp:FILE* = fopen(argv[1], "r");
-    parse(inp);
+    let outp:FILE* = stdout;
+    if(argc > 2) {
+      outp = fopen(argv[3], "wb");
+      if(outp == NULL) {
+        !"!! Failed to open output file.."
+        fclose(inp);
+        return -1;
+      }
+    }
+    let symtable:SymbolTable* = createSymTable();
+    let stmtlist:StatementList* = createStatementList();
+
+    //pass 1: Build sym and parse statements.
+    rewind(inp);
+    parse(inp, NULL, symtable, 1, stmtlist);
+    //Pass 2: Gen machine code from the stored statement list.
+    parse(NULL, outp, symtable, 2, stmtlist);
+    if(symtable != NULL) { freeSymTable(symtable) };
+    if(stmtlist != NULL) { freeStatementList(stmtlist); }
+    fclose(inp);
+    if(outp != stdout) { fclose(outp); } 
   }
   return 0;
 }
