@@ -7,9 +7,9 @@ Will submit as examples to the repo when they do something more interesting than
   added registers: RCX,RDX, RSP, RSI, RDI<br>
   Add fixed size Sib and Modr/m to MOV and LEA.<br>
   Displacements for MOV and LEA instructions.<br>
-  Added Push/Pop/Syscall/Lea Instructions.<br><br>
+  Added Push/Pop/Syscall/Lea Instructions.<br>
+  2 pass assembler, labels<br>
 <b>Still TODO:</b><br>
-Fix reg, [reg+disp32] <br>
-Add support for Labels.<br>
-Add Second pass to handle Labels<br>
+add DB(Directives).
+Figure out why the Parser is screwing me over.
 Make it do something other than print out assembled code.
