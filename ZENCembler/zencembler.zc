@@ -298,7 +298,7 @@ fn assembleStatement(stmt:Statement) -> MachineCode {
         code = (byte *)malloc(size);
         code[0] = 0x48; 
         code[1] = 0x81; 
-        code[2] = 0xX0 + stmt.op1.reg;    //ModR/M (C0 for RAX, C3 for rbx )
+        code[2] = 0X0 + stmt.op1.reg;    //ModR/M (C0 for RAX, C3 for rbx )
         *((u32 *)(code+1)) = stmt.op2.constant;
       }
     },
